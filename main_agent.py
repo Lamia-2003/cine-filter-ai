@@ -1,17 +1,21 @@
 import json
+import os
 import clickhouse_connect
+from dotenv import load_dotenv
 from google import genai
 
-# 1. إعداد مفاتيح الاتصال
-GEMINI_API_KEY = "AQ.Ab8RN6LU2HII3RRaLrWuaQWpqI83krjjfgNziokzFh1p8ZTP4A"
+# 1. Load Environment Variables
+load_dotenv()
 
-CLICKHOUSE_HOST = "euc1c1p1aw.europe-west2.gcp.clickhouse.cloud"
-CLICKHOUSE_USER = "default"
-CLICKHOUSE_PASS = "JjRypBwYE.Kc4"
+# We pass the Variable NAMES into getenv(), not the actual key values
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST")
+CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASS = os.getenv("CLICKHOUSE_PASS")
 
-
-# 2. تهيئة العملاء (Clients)
+# 2. Initialize Clients
 def init_clients():
+    """Initializes and returns Gemini and ClickHouse client instances."""
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     ch_client = clickhouse_connect.get_client(
         host=CLICKHOUSE_HOST,
@@ -23,8 +27,9 @@ def init_clients():
     return gemini_client, ch_client
 
 
-# 3. إنشاء جدول البيانات في ClickHouse إذا لم يكن موجوداً
+# 3. Setup ClickHouse Database Table
 def setup_database(ch_client):
+    """Creates the scene_analyses table in ClickHouse if it doesn't already exist."""
     create_table_query = """
     CREATE TABLE IF NOT EXISTS scene_analyses (
         movie_title String,
@@ -38,11 +43,12 @@ def setup_database(ch_client):
     ORDER BY (movie_title, created_at);
     """
     ch_client.command(create_table_query)
-    print("[DB] الجدول في ClickHouse جاهز لاستقبال البيانات.")
+    print("[DB] ClickHouse table is ready for data ingestion.")
 
 
-# 4. تحليل المشهد باستخدام Gemini
+# 4. Analyze Scene Content with Gemini
 def analyze_scene_with_gemini(gemini_client, scene_text):
+    """Sends the scene script or description to Gemini for safety analysis."""
     prompt = f"""
     You are an AI safety agent for media filtering.
     Analyze the following scene script/description:
@@ -58,24 +64,20 @@ def analyze_scene_with_gemini(gemini_client, scene_text):
         model="gemini-3.6-flash", contents=prompt
     )
 
-    # تنظيف وتنسيق نص الـ JSON
+    # Clean and parse the raw JSON string
     clean_json_text = (
         response.text.replace("```json", "").replace("```", "").strip()
     )
     return json.loads(clean_json_text)
 
 
-# 5. حفظ النتيجة في ClickHouse
+# 5. Save Analysis Result to ClickHouse
 def save_to_clickhouse(
     ch_client, movie_title, start_time, end_time, analysis
 ):
+    """Inserts the parsed safety analysis into the ClickHouse database."""
     is_flagged = 1 if analysis.get("contains_inappropriate", False) else 0
 
-    insert_query = """
-    INSERT INTO scene_analyses 
-    (movie_title, timestamp_start, timestamp_end, contains_inappropriate, category, recommendation) 
-    VALUES
-    """
     data = [(
         movie_title,
         start_time,
@@ -97,15 +99,17 @@ def save_to_clickhouse(
             "recommendation",
         ],
     )
-    print(f"[DB] تم حفظ تحليل المشهد ({start_time} - {end_time}) بنجاح!")
+    print(
+        f"[DB] Scene analysis ({start_time} - {end_time}) saved successfully!"
+    )
 
 
-# --- تشغيل التجربة ---
+# --- Main Execution Pipeline ---
 if __name__ == "__main__":
     gemini_client, ch_client = init_clients()
     setup_database(ch_client)
 
-    # مشهد تجريبي
+    # Sample test data
     sample_movie = "The Blockbuster Movie"
     sample_start = "00:14:20"
     sample_end = "00:15:05"
@@ -114,18 +118,18 @@ if __name__ == "__main__":
         " throws a wooden chair across the dining room."
     )
 
-    print("\n--- جاري تحليل المشهد بواسطة Gemini ---")
+    print("\n--- Analyzing scene using Gemini 3.6 ---")
     analysis = analyze_scene_with_gemini(
         gemini_client, sample_scene_description
     )
-    print("نتيجة التحليل:", analysis)
+    print("Analysis Result:", analysis)
 
-    print("\n--- جاري إرسال النتيجة إلى ClickHouse ---")
+    print("\n--- Saving result to ClickHouse Cloud ---")
     save_to_clickhouse(
         ch_client, sample_movie, sample_start, sample_end, analysis
     )
 
-    # عرض البيانات المخزنة للتأكد
+    # Fetch stored records to verify
     result = ch_client.query("SELECT * FROM scene_analyses LIMIT 5")
-    print("\n--- البيانات المخزنة حالياً في ClickHouse ---")
+    print("\n--- Current Records in ClickHouse DB ---")
     print(result.result_set)

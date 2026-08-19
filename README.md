@@ -1,2 +1,3 @@
-# cine-filter-ai
-An AI-powered cinema workflow agent using Gemini and ClickHouse to detect sensitive scenes and generate family-friendly timestamps for media streaming.
+CineFilter AI
+
+An automated, end-to-end content moderation agent powered by Gemini 3.6 and ClickHouse Cloud. It analyzes movie scripts and .srt subtitle files in real-time to detect inappropriate scenes, categorize policy violations, and provide automated recommendations via an interactive dashboard.
